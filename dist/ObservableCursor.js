@@ -23,18 +23,17 @@ var ObservableCursor = /** @class */ (function (_super) {
             if (!_this._hCursor) {
                 _this._hCursor = _this._observeCursor(cursor);
             }
-
-            var setTimeoutFn = Meteor.isClient ? setTimeout : Meteor.setTimeout;
-
-            setTimeoutFn(function () {
-                if (_this._isDataInitinialized) {
-                    observer.next(_this._data);
-                }
-                else if (cursor.count() === 0) {
-                    _this._isDataInitinialized = true;
-                    observer.next(_this._data);
-                }
-            }, 0);
+            if (_this._isDataInitinialized) {
+                observer.next(_this._data);
+            }
+            else {
+                _this._setTimeout(function () {
+                    if (cursor.count() === 0) {
+                        _this._isDataInitinialized = true;
+                        observer.next(_this._data);
+                    }
+                }, 0);
+            }
             return function () {
                 removeObserver(_this._observers, observer, function () { return _this.stop(); });
             };
@@ -43,6 +42,8 @@ var ObservableCursor = /** @class */ (function (_super) {
         _this._observers = [];
         _this._countObserver = new Subject();
         _this._isDataInitinialized = false;
+        _this._setTimeout = Meteor.isClient ? setTimeout : Meteor.setTimeout;
+        _this._clearTimeout = Meteor.isClient ? clearTimeout : Meteor.clearTimeout;
         _.extend(_this, _.omit(cursor, 'count', 'map'));
         _this._cursor = cursor;
         _this._zone = forkZone();
@@ -135,10 +136,15 @@ var ObservableCursor = /** @class */ (function (_super) {
         });
     };
     ObservableCursor.prototype._runNext = function (data) {
-        this._countObserver.next(this._data.length);
-        this._observers.forEach(function (observer) {
-            observer.next(data);
-        });
+        var _this = this;
+        this._clearTimeout(this._timeout);
+        this._timeout = this._setTimeout(function () {
+            _this._isDataInitinialized = true;
+            _this._countObserver.next(_this._data.length);
+            _this._observers.forEach(function (observer) {
+                observer.next(data);
+            });
+        }, 0);
     };
     ObservableCursor.prototype._addedAt = function (doc, at, before) {
         this._data.splice(at, 0, doc);
@@ -159,7 +165,6 @@ var ObservableCursor = /** @class */ (function (_super) {
     };
     ObservableCursor.prototype._handleChange = function () {
         var _this = this;
-        this._isDataInitinialized = true;
         this._zone.run(function () {
             _this._runNext(_this._data);
         });

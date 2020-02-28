@@ -12,6 +12,9 @@ export class ObservableCursor<T> extends Observable<T[]> {
   private _observers: Subscriber<T[]>[] = [];
   private _countObserver: Subject<number> = new Subject<number>();
   private _isDataInitinialized = false;
+  private _timeout: number;
+  private _setTimeout = Meteor.isClient ? setTimeout : Meteor.setTimeout;
+  private _clearTimeout = Meteor.isClient ? clearTimeout : Meteor.clearTimeout;
 
   /**
    *  Static method which creates an ObservableCursor from Mongo.Cursor.
@@ -39,16 +42,16 @@ export class ObservableCursor<T> extends Observable<T[]> {
         this._hCursor = this._observeCursor(cursor);
       }
 
-      const setTimeoutFn = Meteor.isClient ? setTimeout : Meteor.setTimeout;
-
-      setTimeoutFn(() => {
-        if (this._isDataInitinialized) {
-          observer.next(this._data);
-        } else if (cursor.count() === 0) {
-          this._isDataInitinialized = true;
-          observer.next(this._data);
-        }
-      }, 0);
+      if (this._isDataInitinialized) {
+        observer.next(this._data);
+      } else {
+        this._setTimeout(() => {
+          if (cursor.count() === 0) {
+            this._isDataInitinialized = true;
+            observer.next(this._data);
+          }
+        }, 0);
+      }
 
       return () => {
         removeObserver(this._observers,
@@ -143,11 +146,14 @@ export class ObservableCursor<T> extends Observable<T[]> {
   }
 
   _runNext(data: Array<T>) {
-    this._countObserver.next(this._data.length);
-
-    this._observers.forEach(observer => {
-      observer.next(data);
-    });
+    this._clearTimeout(this._timeout);
+    this._timeout = this._setTimeout(() => {
+      this._isDataInitinialized = true;
+      this._countObserver.next(this._data.length);
+      this._observers.forEach(observer => {
+        observer.next(data);
+      });
+    }, 0);
   }
 
   _addedAt(doc, at, before) {
@@ -172,8 +178,6 @@ export class ObservableCursor<T> extends Observable<T[]> {
   }
 
   _handleChange() {
-    this._isDataInitinialized = true;
-
     this._zone.run(() => {
       this._runNext(this._data);
     });
